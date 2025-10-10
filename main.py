@@ -21,13 +21,13 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or "8240587038:AAGDO8RzkQ1N34tl-xrn9I1JbEW6kn
 POLL_INTERVAL_SECONDS = 60               
 DB_PATH = os.getenv("DB_PATH", "cryptowatchlive.db")
 
-# Фиатные валюты (ISO-коды)
+
 FIAT_CODES = {
     "USD", "EUR", "RUB", "UAH", "KZT", "GBP", "JPY", "CNY", "TRY", "CHF",
     "PLN", "CZK", "SEK", "NOK", "DKK", "AUD", "CAD", "INR", "BRL", "ZAR",
 }
 
-# Удобные ссылки
+
 BINANCE_BASE_URL = "https://www.binance.com/en/trade/{base}_{quote}?type=spot"
 COINBASE_URL     = "https://www.coinbase.com/advanced-trade/{base}-{quote}"
 KRAKEN_URL       = "https://pro.kraken.com/app/trade/{base}-{quote}"
@@ -290,7 +290,7 @@ def make_exchange_keyboard(base: str, quote: str, price_service: PriceService) -
     b, q = base.upper(), quote.upper()
     rows: List[List[InlineKeyboardButton]] = []
 
-    # Crypto рынки
+    
     if not price_service.is_fiat(b) or not price_service.is_fiat(q):
         bq = BINANCE_QUOTE_ALIAS.get(q, q)
         rows.append([
@@ -299,7 +299,7 @@ def make_exchange_keyboard(base: str, quote: str, price_service: PriceService) -
             InlineKeyboardButton(text="Kraken",   url=KRAKEN_URL.format(base=b, quote=q)),
         ])
 
-    # Fiat конвертеры
+    
     if price_service.is_fiat(b) or price_service.is_fiat(q):
         rows.append([
             InlineKeyboardButton(text="XE Converter", url=XE_CONVERTER_URL.format(base=b, quote=q)),
