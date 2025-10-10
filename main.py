@@ -16,11 +16,9 @@ from aiogram.types import (
     BotCommand,
 )
 
-# ======================
-# Конфигурация
-# ======================
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "8240587038:AAGDO8RzkQ1N34tl-xrn9I1JbEW6kn9JgJQ"  # можно вписать токен прямо сюда, но лучше через ENV
-POLL_INTERVAL_SECONDS = 60                # период фоновой проверки цен
+
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "8240587038:AAGDO8RzkQ1N34tl-xrn9I1JbEW6kn9JgJQ"  
+POLL_INTERVAL_SECONDS = 60               
 DB_PATH = os.getenv("DB_PATH", "cryptowatchlive.db")
 
 # Фиатные валюты (ISO-коды)
@@ -35,11 +33,9 @@ COINBASE_URL     = "https://www.coinbase.com/advanced-trade/{base}-{quote}"
 KRAKEN_URL       = "https://pro.kraken.com/app/trade/{base}-{quote}"
 XE_CONVERTER_URL = "https://www.xe.com/currencyconverter/convert/?Amount=1&From={base}&To={quote}"
 WISE_URL         = "https://wise.com/transfer/{base}-to-{quote}"
-BINANCE_QUOTE_ALIAS = {"USD": "USDT"}  # Binance чаще использует USDT
+BINANCE_QUOTE_ALIAS = {"USD": "USDT"}  
 
-# ======================
-# SQL
-# ======================
+
 CREATE_USERS_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
@@ -81,9 +77,7 @@ class Subscription:
     last_eval: Optional[int]
 
 
-# ======================
-# Сервис цен
-# ======================
+
 class PriceService:
     def __init__(self, session: aiohttp.ClientSession):
         self.session = session
@@ -113,7 +107,7 @@ class PriceService:
                     if sym and cid and sym not in mapping:
                         mapping[sym] = cid
         except Exception:
-            # Фоллбек: полный список, без приоритезации
+            
             url2 = "https://api.coingecko.com/api/v3/coins/list?include_platform=false"
             async with self.session.get(url2, timeout=30) as r:
                 r.raise_for_status()
@@ -166,7 +160,7 @@ class PriceService:
             return float(val) if val is not None else None
 
         async def _frankfurter() -> Optional[float]:
-            # Frankfurter использует 'from' и 'to'; для исторической даты дата идёт в пути
+            
             url = f"https://api.frankfurter.app/{date}" if date else "https://api.frankfurter.app/latest"
             params = {"from": base_u, "to": quote_u}
             async with self.session.get(url, params=params, timeout=30) as r:
@@ -176,7 +170,7 @@ class PriceService:
             val = rates.get(quote_u)
             return float(val) if val is not None else None
 
-        # 1) основной провайдер
+        
         try:
             val = await _exchangerate_host()
             if val is not None:
@@ -184,7 +178,7 @@ class PriceService:
         except Exception:
             pass
 
-        # 2) фоллбек
+       
         try:
             val = await _frankfurter()
             if val is not None:
@@ -199,7 +193,7 @@ class PriceService:
         b, q = base.upper(), quote.upper()
         b_fiat, q_fiat = b in FIAT_CODES, q in FIAT_CODES
 
-        # fiat/fiat
+        
         if b_fiat and q_fiat:
             now = await self._fetch_fiat_rate(b, q)
             y = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
@@ -209,14 +203,14 @@ class PriceService:
 
         await self.ensure_coingecko_map()
 
-        # crypto/fiat
+        
         if not b_fiat and q_fiat:
             base_id = self._cg_symbol_to_id.get(b)
             if not base_id:
                 raise ValueError("Unknown crypto symbol")
             return await self._fetch_crypto_simple(base_id, q)
 
-        # fiat/crypto  => 1/(crypto/fiat)
+        
         if b_fiat and not q_fiat:
             quote_id = self._cg_symbol_to_id.get(q)
             if not quote_id:
@@ -225,7 +219,7 @@ class PriceService:
             inv = 1.0 / price_q_b if price_q_b != 0 else float("inf")
             return inv, (-ch if ch is not None else None)
 
-        # crypto/crypto => (base/USD)/(quote/USD), change ≈ ch_base - ch_quote
+        
         base_id = self._cg_symbol_to_id.get(b)
         quote_id = self._cg_symbol_to_id.get(q)
         if not base_id or not quote_id:
@@ -237,9 +231,7 @@ class PriceService:
         return price, change
 
 
-# ======================
-# Проверка условий
-# ======================
+
 OPS = {
     ">":  lambda x, y: x >  y,
     "<":  lambda x, y: x <  y,
@@ -282,9 +274,7 @@ def parse_watch_args(text: str) -> Optional[Tuple[str, str, float, str]]:
     return base, quote, threshold, op
 
 
-# ======================
-# Клавиатуры
-# ======================
+
 def main_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -319,9 +309,7 @@ def make_exchange_keyboard(base: str, quote: str, price_service: PriceService) -
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-# ======================
-# Инициализация и хендлеры
-# ======================
+
 router = Router()
 
 async def init_db():
@@ -485,7 +473,7 @@ async def unmute_cmd(msg: Message):
         await db.commit()
     await msg.answer("🔔 Уведомления включены.")
 
-# -------- Кнопки-меню (ReplyKeyboard) --------
+
 @router.message(F.text == "🗂️ Мои подписки")
 async def btn_list(msg: Message):
     await list_cmd(msg)
@@ -515,11 +503,9 @@ async def btn_unmute(msg: Message):
     await unmute_cmd(msg)
 
 
-# ======================
-# Фоновая задача слежения за ценами
-# ======================
+
 async def price_watcher(bot: Bot):
-    await asyncio.sleep(2)  # маленькая задержка после старта
+    await asyncio.sleep(2)  
     async with aiohttp.ClientSession() as session:
         ps = PriceService(session)
         while True:
@@ -539,7 +525,7 @@ async def price_watcher(bot: Bot):
                     except Exception:
                         continue
 
-                    # Проверяем mute
+                    
                     async with aiosqlite.connect(DB_PATH) as db:
                         cur = await db.execute("SELECT is_muted FROM users WHERE user_id=?", (s.user_id,))
                         row = await cur.fetchone()
@@ -547,7 +533,7 @@ async def price_watcher(bot: Bot):
 
                     should_notify = (not muted) and ok and (s.last_eval in (None, 0))
 
-                    # Обновим last_eval
+                    
                     async with aiosqlite.connect(DB_PATH) as db:
                         await db.execute("UPDATE subscriptions SET last_eval=? WHERE id=?", (1 if ok else 0, s.id))
                         await db.commit()
@@ -570,22 +556,20 @@ async def price_watcher(bot: Bot):
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 
-# ======================
-# Точка входа
-# ======================
+
 async def main():
     if not BOT_TOKEN:
         raise RuntimeError("Не задан BOT_TOKEN (переменная окружения или константа в коде)")
 
-    # Инициализация БД
+    
     await init_db()
 
-    # Бот/диспетчер
+    
     bot = Bot(BOT_TOKEN, parse_mode=None)
     dp = Dispatcher()
     dp.include_router(router)
 
-    # Команды в меню Telegram
+    
     await bot.set_my_commands([
         BotCommand(command="start",  description="Приветствие и меню"),
         BotCommand(command="menu",   description="Показать главное меню"),
@@ -600,7 +584,7 @@ async def main():
         BotCommand(command="unmute", description="Включить уведомления"),
     ])
 
-    # Фоновая задача слежения
+    
     asyncio.get_event_loop().create_task(price_watcher(bot))
 
     print("CryptoWatchLive запущен. Нажмите Ctrl+C для остановки.")
