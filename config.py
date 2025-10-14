@@ -16,6 +16,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or "8240587038:AAGDO8RzkQ1N34tl-xrn9I1JbEW6kn
 POLL_INTERVAL_SECONDS = 60               
 DB_PATH = os.getenv("DB_PATH", "cryptowatchlive.db")
 
+# Константы для пагинации
+SUBSCRIPTIONS_PER_PAGE = 5  # Количество подписок на одной странице
+
 FIAT_CODES = {
     "USD", "EUR", "RUB", "UAH", "KZT", "GBP", "JPY", "CNY", "TRY", "CHF",
     "PLN", "CZK", "SEK", "NOK", "DKK", "AUD", "CAD", "INR", "BRL", "ZAR",

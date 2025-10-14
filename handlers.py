@@ -5,13 +5,20 @@ from aiogram.types import (
     Message,
     ReplyKeyboardMarkup, KeyboardButton,
     InlineKeyboardMarkup, InlineKeyboardButton,
+    CallbackQuery,
 )
+from aiogram.filters import StateFilter
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
 
 from config import logger, BINANCE_BASE_URL, COINBASE_URL, KRAKEN_URL, XE_CONVERTER_URL, WISE_URL, PROFEE_URL, BINANCE_QUOTE_ALIAS
 from repository import UserRepository, SubscriptionRepository
 from service import PriceService, parse_watch_args, infer_asset_type
 
 router = Router()
+
+class ListStates(StatesGroup):
+    viewing_list = State()
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -45,6 +52,77 @@ def make_exchange_keyboard(base: str, quote: str, price_service: PriceService) -
         rows.append(converter_buttons[i:i+2])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def create_pagination_keyboard(page: int, total_pages: int, user_id: int) -> InlineKeyboardMarkup:
+    """Создает клавиатуру пагинации для списка подписок"""
+    buttons = []
+    
+    # Кнопки навигации
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"list_{user_id}_{page-1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="current_page"))
+    
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"list_{user_id}_{page+1}"))
+    
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    
+    # Кнопка закрытия
+    buttons.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="close_list")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+async def send_subscriptions_page(msg: Message, user_id: int, page: int = 0, page_size: int = 5):
+    """Отправляет страницу со списком подписок"""
+    try:
+        rows = await SubscriptionRepository.get_user_subscriptions(user_id)
+        if not rows:
+            await msg.answer("У вас пока нет подписок. Добавьте: /watch BTC > 30000 USD")
+            return
+
+        total_subscriptions = len(rows)
+        total_pages = (total_subscriptions + page_size - 1) // page_size
+        
+        if page >= total_pages:
+            page = total_pages - 1
+        
+        start_idx = page * page_size
+        end_idx = min(start_idx + page_size, total_subscriptions)
+        
+        lines = [f"📋 Ваши подписки (стр. {page+1}/{total_pages}):"]
+        
+        for i in range(start_idx, end_idx):
+            sid, base, quote, op, thr, active = rows[i]
+            status = "⏸️" if not active else "✅"
+            lines.append(f"#{sid}: {base}/{quote} {op} {thr} {status}")
+        
+        # Добавляем статистику
+        lines.append(f"\n📊 Всего подписок: {total_subscriptions}")
+        active_count = sum(1 for _, _, _, _, _, active in rows if active)
+        lines.append(f"✅ Активных: {active_count}")
+        lines.append(f"⏸️ На паузе: {total_subscriptions - active_count}")
+        
+        response_text = "\n".join(lines)
+        kb = create_pagination_keyboard(page, total_pages, user_id)
+        
+        # Если это callback (изменение страницы), редактируем сообщение
+        if isinstance(msg, CallbackQuery):
+            await msg.message.edit_text(response_text, reply_markup=kb)
+        else:
+            await msg.answer(response_text, reply_markup=kb)
+            
+        logger.info(f"Отправлена страница {page+1}/{total_pages} списка подписок пользователю {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при отправке страницы подписок пользователю {user_id}: {e}")
+        error_msg = "❌ Ошибка при получении списка подписок."
+        if isinstance(msg, CallbackQuery):
+            await msg.message.edit_text(error_msg)
+        else:
+            await msg.answer(error_msg)
 
 @router.message(Command("start"))
 async def start_cmd(msg: Message):
@@ -125,22 +203,43 @@ async def price_cmd(msg: Message):
 @router.message(Command("list"))
 async def list_cmd(msg: Message):
     logger.info(f"Команда list от пользователя {msg.from_user.id}")
+    await send_subscriptions_page(msg, msg.from_user.id)
+
+@router.callback_query(F.data.startswith("list_"))
+async def handle_list_pagination(callback: CallbackQuery):
+    """Обработка пагинации списка подписок"""
     try:
-        rows = await SubscriptionRepository.get_user_subscriptions(msg.from_user.id)
-        if not rows:
-            logger.info(f"У пользователя {msg.from_user.id} нет подписок")
-            await msg.answer("У вас пока нет подписок. Добавьте: /watch BTC > 30000 USD")
-            return
-        lines = ["Ваши подписки:"]
-        for (sid, base, quote, op, thr, active) in rows:
-            status = "⏸️" if not active else "✅"
-            lines.append(f"#{sid}: {base}/{quote} {op} {thr} {status}")
-        response_text = "\n".join(lines)
-        await msg.answer(response_text)
-        logger.info(f"Отправлен список подписок пользователю {msg.from_user.id}, всего: {len(rows)}")
+        # data format: "list_{user_id}_{page}"
+        parts = callback.data.split("_")
+        if len(parts) >= 3:
+            user_id = int(parts[1])
+            page = int(parts[2])
+            
+            # Проверяем, что пользователь имеет доступ к этому списку
+            if callback.from_user.id == user_id:
+                await send_subscriptions_page(callback, user_id, page)
+            else:
+                await callback.answer("❌ Доступ запрещен", show_alert=True)
+        else:
+            await callback.answer("❌ Ошибка пагинации", show_alert=True)
     except Exception as e:
-        logger.error(f"Ошибка при получении списка подписок для пользователя {msg.from_user.id}: {e}")
-        await msg.answer("❌ Ошибка при получении списка подписок.")
+        logger.error(f"Ошибка при обработке пагинации: {e}")
+        await callback.answer("❌ Ошибка при загрузке страницы", show_alert=True)
+
+@router.callback_query(F.data == "close_list")
+async def handle_close_list(callback: CallbackQuery):
+    """Закрытие списка подписок"""
+    try:
+        await callback.message.delete()
+        await callback.answer("Список закрыт")
+    except Exception as e:
+        logger.error(f"Ошибка при закрытии списка: {e}")
+        await callback.answer("❌ Ошибка при закрытии", show_alert=True)
+
+@router.callback_query(F.data == "current_page")
+async def handle_current_page(callback: CallbackQuery):
+    """Обработка нажатия на кнопку текущей страницы"""
+    await callback.answer(f"Вы на странице {callback.message.text.split('стр. ')[1].split(')')[0]}")
 
 def _extract_id_arg(text: str) -> int:
     parts = (text or "").split()
@@ -242,7 +341,7 @@ async def unmute_cmd(msg: Message):
 @router.message(F.text == "🗂️ Мои подписки")
 async def btn_list(msg: Message):
     logger.info(f"Кнопка 'Мои подписки' от пользователя {msg.from_user.id}")
-    await list_cmd(msg)
+    await send_subscriptions_page(msg, msg.from_user.id)
 
 @router.message(F.text == "➕ Подписка")
 async def btn_subscribe(msg: Message):
