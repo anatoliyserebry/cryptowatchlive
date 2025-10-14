@@ -6,7 +6,6 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Tuple, Optional, List
-
 import aiohttp
 import aiosqlite
 from aiogram import Bot, Dispatcher, F, Router
@@ -43,6 +42,7 @@ COINBASE_URL     = "https://www.coinbase.com/advanced-trade/{base}-{quote}"
 KRAKEN_URL       = "https://pro.kraken.com/app/trade/{base}-{quote}"
 XE_CONVERTER_URL = "https://www.xe.com/currencyconverter/convert/?Amount=1&From={base}&To={quote}"
 WISE_URL         = "https://wise.com/transfer/{base}-to-{quote}"
+PROFEE_URL       = "https://profee.com/en"
 BINANCE_QUOTE_ALIAS = {"USD": "USDT"}  
 
 CREATE_USERS_SQL = """
@@ -438,12 +438,26 @@ def make_exchange_keyboard(base: str, quote: str, price_service: PriceService) -
             InlineKeyboardButton(text="Kraken",   url=KRAKEN_URL.format(base=b, quote=q)),
         ])
 
-    # Фиат-сервисы
-    if price_service.is_fiat(b) or price_service.is_fiat(q):
-        rows.append([
-            InlineKeyboardButton(text="XE Converter", url=XE_CONVERTER_URL.format(base=b, quote=q)),
-            InlineKeyboardButton(text="Wise",         url=WISE_URL.format(base=b.lower(), quote=q.lower())),
-        ])
+    
+    converter_buttons = []
+    
+    # XE Converter
+    converter_buttons.append(
+        InlineKeyboardButton(text="XE Converter", url=XE_CONVERTER_URL.format(base=b, quote=q))
+    )
+    
+    # Wise
+    converter_buttons.append(
+        InlineKeyboardButton(text="Wise", url=WISE_URL.format(base=b.lower(), quote=q.lower()))
+    )
+    
+    # Profee
+    converter_buttons.append(
+        InlineKeyboardButton(text="Profee", url=PROFEE_URL)
+    )
+    
+    for i in range(0, len(converter_buttons), 2):
+        rows.append(converter_buttons[i:i+2])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -549,7 +563,7 @@ async def price_cmd(msg: Message):
             ch_txt = f" ({change:+.2f}% за 24ч)" if change is not None else ""
             response_text = f"Текущий курс {base}/{quote}: {price:.8f}{ch_txt}"
             await msg.answer(response_text, reply_markup=kb)
-            logger.info(f"Успешно отправлена цена {base}/{quote} пользователю {msg.from_user.id}")
+            logger.info(f"Успешно отправлена цена {base}/{quote} пользователю {msg.from_user.id} с клавиатурой конвертеров")
         except Exception as e:
             logger.error(f"Ошибка при получении цены {base}/{quote} для пользователя {msg.from_user.id}: {e}")
             await msg.answer(f"Не удалось получить цену: {e}")
