@@ -30,6 +30,7 @@ KRAKEN_URL       = "https://pro.kraken.com/app/trade/{base}-{quote}"
 XE_CONVERTER_URL = "https://www.xe.com/currencyconverter/convert/?Amount=1&From={base}&To={quote}"
 WISE_URL         = "https://wise.com/transfer/{base}-to-{quote}"
 PROFEE_URL       = "https://profee.com/en"
+COINPAPRIKA_BASE_URL = "https://coinpaprika.com/coin/"
 BINANCE_QUOTE_ALIAS = {"USD": "USDT"}
 
 CREATE_USERS_SQL = """

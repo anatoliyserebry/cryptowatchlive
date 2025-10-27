@@ -1,6 +1,7 @@
 import re
 import xml.etree.ElementTree as ET
 import aiohttp
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Tuple, Optional, List
 
@@ -40,85 +41,140 @@ def parse_watch_args(text: str) -> Optional[Tuple[str, str, float, str]]:
 class PriceService:
     def __init__(self, session: aiohttp.ClientSession):
         self.session = session
-        self._cg_symbol_to_id: Dict[str, str] = {}
-        self._cg_ready = False
         logger.info("PriceService инициализирован")
 
-    async def ensure_coingecko_map(self):
-        if self._cg_ready:
-            return
-            
-        logger.info("Загрузка карты символов CoinGecko...")
-        url = "https://api.coingecko.com/api/v3/coins/markets"
-        params = {
-            "vs_currency": "usd",
-            "order": "market_cap_desc",
-            "per_page": 250,
-            "page": 1,
-            "price_change_percentage": "24h",
-        }
-        mapping: Dict[str, str] = {}
+    async def _get_yahoo_finance_price(self, base: str, quote: str) -> Tuple[float, Optional[float]]:
+        """Получает цену через Yahoo Finance API (работает для BTC-USD, ETH-USD и других основных пар)"""
         try:
-            async with self.session.get(url, params=params, timeout=30) as r:
-                r.raise_for_status()
-                data = await r.json()
-                for coin in data:
-                    sym = str(coin.get("symbol", "")).upper()
-                    cid = coin.get("id")
-                    if sym and cid and sym not in mapping:
-                        mapping[sym] = cid
-            logger.info(f"Успешно загружено {len(mapping)} символов из CoinGecko markets API")
-        except Exception as e:
-            logger.warning(f"Ошибка при загрузке из markets API: {e}, пробуем альтернативный метод")
+            # Формируем символ для Yahoo Finance
+            symbol = f"{base}-{quote}"
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
             
-            try:
-                url2 = "https://api.coingecko.com/api/v3/coins/list?include_platform=false"
-                async with self.session.get(url2, timeout=30) as r:
-                    r.raise_for_status()
+            async with self.session.get(url, timeout=30) as r:
+                if r.status == 200:
                     data = await r.json()
-                    for coin in data:
-                        sym = str(coin.get("symbol", "")).upper()
-                        cid = coin.get("id")
-                        if sym and cid and sym not in mapping:
-                            mapping[sym] = cid
-                logger.info(f"Успешно загружено {len(mapping)} символов из CoinGecko list API")
-            except Exception as e2:
-                logger.error(f"Критическая ошибка при загрузке карты символов: {e2}")
-                raise
+                    
+                    result = data.get('chart', {}).get('result', [{}])[0]
+                    meta = result.get('meta', {})
+                    
+                    price = meta.get('regularMarketPrice', 0)
+                    previous_close = meta.get('previousClose', 0)
+                    
+                    if price and previous_close:
+                        change_percent = ((price - previous_close) / previous_close) * 100
+                    else:
+                        change_percent = None
+                    
+                    logger.debug(f"Yahoo Finance: {base}/{quote} = {price}, изменение: {change_percent}%")
+                    return float(price), change_percent
+                else:
+                    raise ValueError(f"Пара {symbol} не найдена на Yahoo Finance")
+                    
+        except Exception as e:
+            logger.debug(f"Yahoo Finance API не сработал для {base}/{quote}: {e}")
+            raise
 
-        self._cg_symbol_to_id = mapping
-        self._cg_ready = True
-        logger.debug(f"Карта символов готова, всего символов: {len(mapping)}")
+    async def _get_binance_public_price(self, base: str, quote: str) -> Tuple[float, Optional[float]]:
+        """Получает цену с Binance Public API (работает без ключа)"""
+        try:
+            # Для Binance используем USDT вместо USD
+            binance_quote = "USDT" if quote.upper() == "USD" else quote.upper()
+            symbol = f"{base.upper()}{binance_quote.upper()}"
+            
+            # Пробуем получить цену
+            url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
+            
+            async with self.session.get(url, timeout=30) as r:
+                if r.status == 200:
+                    price_data = await r.json()
+                    price = float(price_data['price'])
+                    
+                    # Получаем 24ч статистику
+                    stats_url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
+                    async with self.session.get(stats_url, timeout=30) as r2:
+                        if r2.status == 200:
+                            stats_data = await r2.json()
+                            price_change = float(stats_data.get('priceChangePercent', 0))
+                        else:
+                            price_change = None
+                    
+                    logger.debug(f"Binance: {base}/{quote} = {price}, изменение: {price_change}%")
+                    return price, price_change
+                else:
+                    raise ValueError(f"Пара {symbol} не найдена на Binance")
+                    
+        except Exception as e:
+            logger.debug(f"Binance API не сработал для {base}/{quote}: {e}")
+            raise
+
+    async def _get_coingecko_simple_price(self, base: str, quote: str) -> Tuple[float, Optional[float]]:
+        """Получает цену с CoinGecko Simple API (без ключа)"""
+        try:
+            # Получаем ID монеты
+            coin_id = base.lower()
+            
+            url = f"https://api.coingecko.com/api/v3/simple/price"
+            params = {
+                'ids': coin_id,
+                'vs_currencies': quote.lower(),
+                'include_24hr_change': 'true'
+            }
+            
+            async with self.session.get(url, params=params, timeout=30) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    
+                    if coin_id in data:
+                        coin_data = data[coin_id]
+                        price = coin_data.get(quote.lower(), 0)
+                        change_key = f"{quote.lower()}_24h_change"
+                        change = coin_data.get(change_key)
+                        
+                        logger.debug(f"CoinGecko: {base}/{quote} = {price}, изменение: {change}%")
+                        return float(price), float(change) if change is not None else None
+                    else:
+                        raise ValueError(f"Монета {base} не найдена на CoinGecko")
+                else:
+                    raise ValueError(f"Ошибка CoinGecko API: {r.status}")
+                    
+        except Exception as e:
+            logger.debug(f"CoinGecko API не сработал для {base}/{quote}: {e}")
+            raise
+
+    async def _get_mexc_price(self, base: str, quote: str) -> Tuple[float, Optional[float]]:
+        """Получает цену с MEXC API"""
+        try:
+            symbol = f"{base.upper()}{quote.upper()}"
+            url = f"https://api.mexc.com/api/v3/ticker/price?symbol={symbol}"
+            
+            async with self.session.get(url, timeout=30) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    price = float(data['price'])
+                    
+                    # Получаем 24ч изменение
+                    stats_url = f"https://api.mexc.com/api/v3/ticker/24hr?symbol={symbol}"
+                    async with self.session.get(stats_url, timeout=30) as r2:
+                        if r2.status == 200:
+                            stats_data = await r2.json()
+                            price_change = float(stats_data.get('priceChangePercent', 0))
+                        else:
+                            price_change = None
+                    
+                    logger.debug(f"MEXC: {base}/{quote} = {price}, изменение: {price_change}%")
+                    return price, price_change
+                else:
+                    raise ValueError(f"Пара {symbol} не найдена на MEXC")
+                    
+        except Exception as e:
+            logger.debug(f"MEXC API не сработал для {base}/{quote}: {e}")
+            raise
 
     def is_fiat(self, code: str) -> bool:
         return code.upper() in FIAT_CODES
 
-    async def _fetch_crypto_simple(self, base_id: str, quote: str) -> Tuple[float, Optional[float]]:
-        logger.debug(f"Запрос цены криптовалюты: {base_id}/{quote}")
-        url = "https://api.coingecko.com/api/v3/simple/price"
-        params = {
-            "ids": base_id,
-            "vs_currencies": quote.lower(),
-            "include_24hr_change": "true",
-        }
-        try:
-            async with self.session.get(url, params=params, timeout=30) as r:
-                r.raise_for_status()
-                data = await r.json()
-            if base_id not in data:
-                logger.warning(f"Ассет {base_id} не найден на CoinGecko")
-                raise ValueError("Asset not found on CoinGecko")
-            price = float(data[base_id][quote.lower()])
-            ch_key = f"{quote.lower()}_24h_change"
-            ch = data[base_id].get(ch_key)
-            change_pct = float(ch) if ch is not None else None
-            logger.debug(f"Получена цена {base_id}/{quote}: {price}, изменение: {change_pct}")
-            return price, change_pct
-        except Exception as e:
-            logger.error(f"Ошибка при получении цены {base_id}/{quote}: {e}")
-            raise
-
     async def _fetch_fiat_rate(self, base: str, quote: str, date: Optional[str] = None) -> float:
+        """Курс фиат->фиат"""
         base_u, quote_u = base.upper(), quote.upper()
         logger.debug(f"Запрос курса фиата: {base_u}/{quote_u}, дата: {date}")
 
@@ -248,10 +304,12 @@ class PriceService:
         raise ValueError("Fiat quote not supported")
 
     async def get_price_and_change(self, base: str, quote: str) -> Tuple[float, Optional[float]]:
+        """Возвращает (цена base/quote, 24h pct change)."""
         b, q = base.upper(), quote.upper()
-        b_fiat, q_fiat = b in FIAT_CODES, q in FIAT_CODES
+        b_fiat, q_fiat = self.is_fiat(b), self.is_fiat(q)
         logger.info(f"Получение цены: {b}/{q}, типы: base_fiat={b_fiat}, quote_fiat={q_fiat}")
 
+        # Фиат-фиат
         if b_fiat and q_fiat:
             logger.debug(f"Фиат-фиат пара: {b}/{q}")
             now = await self._fetch_fiat_rate(b, q)
@@ -261,41 +319,86 @@ class PriceService:
             logger.info(f"Курс фиата {b}/{q}: {now}, изменение: {change}")
             return now, change
 
-        await self.ensure_coingecko_map()
-
+        # Крипто-фиат (например, BTC/USD)
         if not b_fiat and q_fiat:
             logger.debug(f"Крипто-фиат пара: {b}/{q}")
-            base_id = self._cg_symbol_to_id.get(b)
-            if not base_id:
-                logger.error(f"Неизвестный символ криптовалюты: {b}")
-                raise ValueError("Unknown crypto symbol")
-            return await self._fetch_crypto_simple(base_id, q)
+            
+            # Пробуем разные API по очереди
+            apis_to_try = [
+                self._get_binance_public_price,  # Binance с USDT для USD
+                self._get_coingecko_simple_price,  # CoinGecko
+                self._get_yahoo_finance_price,    # Yahoo Finance
+                self._get_mexc_price              # MEXC
+            ]
+            
+            last_error = None
+            for api_func in apis_to_try:
+                try:
+                    result = await api_func(b, q)
+                    logger.info(f"Успешно получена цена {b}/{q} через {api_func.__name__}: {result[0]}")
+                    return result
+                except Exception as e:
+                    last_error = e
+                    logger.debug(f"API {api_func.__name__} не сработал для {b}/{q}: {e}")
+                    continue
+            
+            logger.error(f"Все API не сработали для {b}/{q}. Последняя ошибка: {last_error}")
+            raise ValueError(f"Не удалось получить цену для пары {b}/{q}. Попробуйте позже.")
 
+        # Фиат-крипто (например, USD/BTC) - инвертируем пару
         if b_fiat and not q_fiat:
             logger.debug(f"Фиат-крипто пара: {b}/{q}")
-            quote_id = self._cg_symbol_to_id.get(q)
-            if not quote_id:
-                logger.error(f"Неизвестный символ криптовалюты: {q}")
-                raise ValueError("Unknown crypto symbol")
-            price_q_b, ch = await self._fetch_crypto_simple(quote_id, b)
-            inv = 1.0 / price_q_b if price_q_b != 0 else float("inf")
-            result_change = -ch if ch is not None else None
-            logger.info(f"Инвертированный курс {b}/{q}: {inv}, изменение: {result_change}")
-            return inv, result_change
+            try:
+                # Получаем цену QUOTE/BASE (крипто/фиат) и инвертируем
+                quote_to_base, quote_change = await self.get_price_and_change(q, b)
+                inverted_price = 1.0 / quote_to_base if quote_to_base != 0 else float("inf")
+                logger.info(f"Инвертированный курс {b}/{q}: {inverted_price}, изменение: {-quote_change if quote_change else None}%")
+                return inverted_price, -quote_change if quote_change else None
+            except Exception as e:
+                logger.error(f"Ошибка при получении инвертированного курса {b}/{q}: {e}")
+                raise
 
+        # Крипто-крипто (например, BTC/ETH)
         logger.debug(f"Крипто-крипто пара: {b}/{q}")
-        base_id = self._cg_symbol_to_id.get(b)
-        quote_id = self._cg_symbol_to_id.get(q)
-        if not base_id or not quote_id:
-            logger.error(f"Неизвестные символы криптовалют: base={b}({base_id}), quote={q}({quote_id})")
-            raise ValueError("Unknown crypto symbol(s)")
         
-        pb_usd, chb = await self._fetch_crypto_simple(base_id, "USD")
-        pq_usd, chq = await self._fetch_crypto_simple(quote_id, "USD")
-        price = pb_usd / pq_usd if pq_usd != 0 else float("inf")
-        change = (chb - chq) if (chb is not None and chq is not None) else None
-        logger.info(f"Кросс-курс крипто {b}/{q}: {price}, изменение: {change}")
-        return price, change
+        # Пробуем разные API по очереди
+        apis_to_try = [
+            self._get_binance_public_price,
+            self._get_coingecko_simple_price,
+            self._get_mexc_price
+        ]
+        
+        last_error = None
+        for api_func in apis_to_try:
+            try:
+                result = await api_func(b, q)
+                logger.info(f"Успешно получена цена {b}/{q} через {api_func.__name__}: {result[0]}")
+                return result
+            except Exception as e:
+                last_error = e
+                logger.debug(f"API {api_func.__name__} не сработал для {b}/{q}: {e}")
+                continue
+        
+        # Если прямые пары не найдены, пробуем через USD
+        logger.debug(f"Прямые пары не найдены, пробуем через USD для {b}/{q}")
+        try:
+            b_to_usd, b_change = await self.get_price_and_change(b, "USD")
+            q_to_usd, q_change = await self.get_price_and_change(q, "USD")
+            
+            if q_to_usd == 0:
+                raise ValueError("Деление на ноль")
+                
+            cross_price = b_to_usd / q_to_usd
+            
+            # Рассчитываем примерное изменение (разница изменений)
+            cross_change = (b_change - q_change) if (b_change is not None and q_change is not None) else None
+            
+            logger.info(f"Кросс-курс крипто {b}/{q}: {cross_price}, изменение: {cross_change}%")
+            return cross_price, cross_change
+            
+        except Exception as usd_error:
+            logger.error(f"Не удалось получить кросс-курс для {b}/{q} даже через USD: {usd_error}")
+            raise ValueError(f"Не удалось получить цену для пары {b}/{q}")
 
 class SubscriptionService:
     def __init__(self, price_service: PriceService):
