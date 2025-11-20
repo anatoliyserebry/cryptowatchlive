@@ -46,7 +46,7 @@ class PriceService:
     async def _get_yahoo_finance_price(self, base: str, quote: str) -> Tuple[float, Optional[float]]:
         """Получает цену через Yahoo Finance API (работает для BTC-USD, ETH-USD и других основных пар)"""
         try:
-            # Формируем символ для Yahoo Finance
+            # Формирование символа для Yahoo Finance 
             symbol = f"{base}-{quote}"
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
             
@@ -77,11 +77,11 @@ class PriceService:
     async def _get_binance_public_price(self, base: str, quote: str) -> Tuple[float, Optional[float]]:
         """Получает цену с Binance Public API (работает без ключа)"""
         try:
-            # Для Binance используем USDT вместо USD
+            # For Binance use USDT instead of USD 
             binance_quote = "USDT" if quote.upper() == "USD" else quote.upper()
             symbol = f"{base.upper()}{binance_quote.upper()}"
             
-            # Пробуем получить цену
+            # trying to optain price
             url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
             
             async with self.session.get(url, timeout=30) as r:
@@ -89,7 +89,7 @@ class PriceService:
                     price_data = await r.json()
                     price = float(price_data['price'])
                     
-                    # Получаем 24ч статистику
+                    # 24h Stats 
                     stats_url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
                     async with self.session.get(stats_url, timeout=30) as r2:
                         if r2.status == 200:
@@ -152,7 +152,7 @@ class PriceService:
                     data = await r.json()
                     price = float(data['price'])
                     
-                    # Получаем 24ч изменение
+                    # 24h update changes 
                     stats_url = f"https://api.mexc.com/api/v3/ticker/24hr?symbol={symbol}"
                     async with self.session.get(stats_url, timeout=30) as r2:
                         if r2.status == 200:
@@ -309,7 +309,7 @@ class PriceService:
         b_fiat, q_fiat = self.is_fiat(b), self.is_fiat(q)
         logger.info(f"Получение цены: {b}/{q}, типы: base_fiat={b_fiat}, quote_fiat={q_fiat}")
 
-        # Фиат-фиат
+        # Fiat to fiat 
         if b_fiat and q_fiat:
             logger.debug(f"Фиат-фиат пара: {b}/{q}")
             now = await self._fetch_fiat_rate(b, q)
@@ -319,13 +319,13 @@ class PriceService:
             logger.info(f"Курс фиата {b}/{q}: {now}, изменение: {change}")
             return now, change
 
-        # Крипто-фиат (например, BTC/USD)
+        # crypto to fiat (например, BTC/USD)
         if not b_fiat and q_fiat:
             logger.debug(f"Крипто-фиат пара: {b}/{q}")
             
-            # Пробуем разные API по очереди
+            # Trying different API 
             apis_to_try = [
-                self._get_binance_public_price,  # Binance с USDT для USD
+                self._get_binance_public_price,  # Binance with USDT for USD 
                 self._get_coingecko_simple_price,  # CoinGecko
                 self._get_yahoo_finance_price,    # Yahoo Finance
                 self._get_mexc_price              # MEXC
@@ -345,11 +345,11 @@ class PriceService:
             logger.error(f"Все API не сработали для {b}/{q}. Последняя ошибка: {last_error}")
             raise ValueError(f"Не удалось получить цену для пары {b}/{q}. Попробуйте позже.")
 
-        # Фиат-крипто (например, USD/BTC) - инвертируем пару
+        # Fiat to Crypto (например, USD/BTC) - инвертируем пару
         if b_fiat and not q_fiat:
             logger.debug(f"Фиат-крипто пара: {b}/{q}")
             try:
-                # Получаем цену QUOTE/BASE (крипто/фиат) и инвертируем
+                # Give pirce if = QUOTE/BASE (крипто/фиат) and invert
                 quote_to_base, quote_change = await self.get_price_and_change(q, b)
                 inverted_price = 1.0 / quote_to_base if quote_to_base != 0 else float("inf")
                 logger.info(f"Инвертированный курс {b}/{q}: {inverted_price}, изменение: {-quote_change if quote_change else None}%")
@@ -358,10 +358,10 @@ class PriceService:
                 logger.error(f"Ошибка при получении инвертированного курса {b}/{q}: {e}")
                 raise
 
-        # Крипто-крипто (например, BTC/ETH)
+        # Crypto to Crypto (например, BTC/ETH)
         logger.debug(f"Крипто-крипто пара: {b}/{q}")
         
-        # Пробуем разные API по очереди
+        # Diffrents API 
         apis_to_try = [
             self._get_binance_public_price,
             self._get_coingecko_simple_price,
@@ -379,7 +379,7 @@ class PriceService:
                 logger.debug(f"API {api_func.__name__} не сработал для {b}/{q}: {e}")
                 continue
         
-        # Если прямые пары не найдены, пробуем через USD
+        # Если прямые пары не найдены, try with USD 
         logger.debug(f"Прямые пары не найдены, пробуем через USD для {b}/{q}")
         try:
             b_to_usd, b_change = await self.get_price_and_change(b, "USD")
@@ -390,7 +390,7 @@ class PriceService:
                 
             cross_price = b_to_usd / q_to_usd
             
-            # Рассчитываем примерное изменение (разница изменений)
+            
             cross_change = (b_change - q_change) if (b_change is not None and q_change is not None) else None
             
             logger.info(f"Кросс-курс крипто {b}/{q}: {cross_price}, изменение: {cross_change}%")

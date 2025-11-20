@@ -1,7 +1,7 @@
 import os
 import logging
 
-# Настройка логирования
+# Log settings 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -16,8 +16,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or "8240587038:AAGDO8RzkQ1N34tl-xrn9I1JbEW6kn
 POLL_INTERVAL_SECONDS = 60               
 DB_PATH = os.getenv("DB_PATH", "cryptowatchlive.db")
 
-# Константы для пагинации
-SUBSCRIPTIONS_PER_PAGE = 5  # Количество подписок на одной странице
+# config 
+SUBSCRIPTIONS_PER_PAGE = 5  # Max Number of subscriptions in one page 
 
 FIAT_CODES = {
     "USD", "EUR", "RUB", "UAH", "KZT", "GBP", "JPY", "CNY", "TRY", "CHF",

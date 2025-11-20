@@ -57,7 +57,7 @@ def create_pagination_keyboard(page: int, total_pages: int, user_id: int) -> Inl
     """Создает клавиатуру пагинации для списка подписок"""
     buttons = []
     
-    # Кнопки навигации
+    # Navigation Buttons 
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"list_{user_id}_{page-1}"))
@@ -70,7 +70,7 @@ def create_pagination_keyboard(page: int, total_pages: int, user_id: int) -> Inl
     if nav_buttons:
         buttons.append(nav_buttons)
     
-    # Кнопка закрытия
+    # Close button 
     buttons.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="close_list")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -99,7 +99,7 @@ async def send_subscriptions_page(msg: Message, user_id: int, page: int = 0, pag
             status = "⏸️" if not active else "✅"
             lines.append(f"#{sid}: {base}/{quote} {op} {thr} {status}")
         
-        # Добавляем статистику
+        # Add Stats 
         lines.append(f"\n📊 Всего подписок: {total_subscriptions}")
         active_count = sum(1 for _, _, _, _, _, active in rows if active)
         lines.append(f"✅ Активных: {active_count}")
@@ -108,7 +108,7 @@ async def send_subscriptions_page(msg: Message, user_id: int, page: int = 0, pag
         response_text = "\n".join(lines)
         kb = create_pagination_keyboard(page, total_pages, user_id)
         
-        # Если это callback (изменение страницы), редактируем сообщение
+        # If it's a callback, update page 
         if isinstance(msg, CallbackQuery):
             await msg.message.edit_text(response_text, reply_markup=kb)
         else:
@@ -215,7 +215,7 @@ async def handle_list_pagination(callback: CallbackQuery):
             user_id = int(parts[1])
             page = int(parts[2])
             
-            # Проверяем, что пользователь имеет доступ к этому списку
+            # Verification if the user have acces to the list of subs  
             if callback.from_user.id == user_id:
                 await send_subscriptions_page(callback, user_id, page)
             else:
