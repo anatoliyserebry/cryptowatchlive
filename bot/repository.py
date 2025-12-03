@@ -1,6 +1,6 @@
 import aiosqlite
-from config import logger, DB_PATH, CREATE_USERS_SQL, CREATE_SUBS_SQL, READ_SUBS_SQL
-from models import Subscription
+from bot.config import logger, DB_PATH, CREATE_USERS_SQL, CREATE_SUBS_SQL, READ_SUBS_SQL
+from bot.models import Subscription
 
 class UserRepository:
     @staticmethod

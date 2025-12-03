@@ -11,9 +11,9 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
-from config import logger, BINANCE_BASE_URL, COINBASE_URL, KRAKEN_URL, XE_CONVERTER_URL, WISE_URL, PROFEE_URL, BINANCE_QUOTE_ALIAS
-from repository import UserRepository, SubscriptionRepository
-from service import PriceService, parse_watch_args, infer_asset_type
+from bot.config import logger, BINANCE_BASE_URL, COINBASE_URL, KRAKEN_URL, XE_CONVERTER_URL, WISE_URL, PROFEE_URL, BINANCE_QUOTE_ALIAS
+from bot.repository import UserRepository, SubscriptionRepository
+from bot.service import PriceService, parse_watch_args, infer_asset_type
 
 router = Router()
 

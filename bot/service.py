@@ -5,8 +5,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Tuple, Optional, List
 
-from config import logger, FIAT_CODES, OPS
-from models import Subscription
+from bot.config import logger, FIAT_CODES, OPS
+from bot.models import Subscription
 
 def infer_asset_type(base: str, quote: str) -> str:
     b_f, q_f = base.upper() in FIAT_CODES, quote.upper() in FIAT_CODES
