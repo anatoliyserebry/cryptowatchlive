@@ -83,8 +83,8 @@ services:
     stop_signal: SIGTERM
     container_name: cryptowatchlive
     build:
-      context: .
-      dockerfile: ./bot/Dockerfile
+      context: ./bot
+      dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
