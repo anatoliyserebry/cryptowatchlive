@@ -40,7 +40,7 @@ services:
       POSTGRES_PASSWORD: "123Secret_a"
       PGDATA: "/var/lib/postgresql/data/pgdata"
     volumes:
-      - flight-data:/var/lib/postgresql/data
+      - crypto_data:/var/lib/postgresql/data
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d cryptowatchlivedb" ]
       interval: 10s
@@ -78,7 +78,7 @@ services:
     networks:
       - postgres
 
-  flightservice:
+  cryptowatchlive:
     stop_grace_period: 30s
     stop_signal: SIGTERM
     container_name: cryptowatchlive
@@ -94,7 +94,7 @@ services:
       - postgres
 
 volumes:
-  flight-data:
+  crypto_data:
   pgadmin-data:
 
 networks:
